@@ -236,7 +236,10 @@ check_macos_update() {
     if [[ $(get_software_updates) == "Updates Available" ]]; then
         updates_available="true"
 
-        # Verify with softwareupdate -l (short timeout) to reduce false positives
+        # Verify with softwareupdate using --no-scan to avoid triggering a fresh scan
+        # which can timeout. We prioritize avoiding false negatives (missing actual updates)
+        # over false positives, so we only clear the update flag when softwareupdate
+        # explicitly reports "No new software available"
         local sw_output=""
         local sw_status=0
         local spinner_started=false
@@ -245,7 +248,10 @@ check_macos_update() {
             spinner_started=true
         fi
 
-        if ! sw_output=$(run_with_timeout 5 softwareupdate -l 2> /dev/null); then
+        local softwareupdate_timeout="${MO_SOFTWAREUPDATE_TIMEOUT:-10}"
+        if sw_output=$(run_with_timeout "$softwareupdate_timeout" softwareupdate -l --no-scan 2> /dev/null); then
+            :
+        else
             sw_status=$?
         fi
 
@@ -253,11 +259,17 @@ check_macos_update() {
             stop_inline_spinner
         fi
 
-        # If command failed, timed out, or returned empty, treat as no updates to avoid false positives
-        if [[ $sw_status -ne 0 || -z "$sw_output" ]]; then
-            updates_available="false"
-        elif echo "$sw_output" | grep -q "No new software available"; then
-            updates_available="false"
+        # Debug logging for troubleshooting
+        if [[ -n "${MO_DEBUG:-}" ]]; then
+            echo "[DEBUG] softwareupdate exit status: $sw_status, output lines: $(echo "$sw_output" | wc -l | tr -d ' ')" >&2
+        fi
+
+        # Prefer avoiding false negatives: if the system indicates updates are pending,
+        # only clear the flag when softwareupdate returns a list without any update entries.
+        if [[ $sw_status -eq 0 && -n "$sw_output" ]]; then
+            if ! echo "$sw_output" | grep -qE '^[[:space:]]*\*'; then
+                updates_available="false"
+            fi
         fi
     fi
 

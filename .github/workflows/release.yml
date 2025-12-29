@@ -13,10 +13,10 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v5
         with:
           go-version: "1.24.6"
           cache: true
@@ -87,7 +87,7 @@ jobs:
           echo "Releasing version: $VERSION (tag: $TAG)"
 
       - name: Update Homebrew formula
-        uses: mislav/bump-homebrew-formula-action@v3
+        uses: mislav/bump-homebrew-formula-action@56a283fa15557e9abaa4bdb63b8212abc68e655c # v3.6
         with:
           formula-name: mole
           formula-path: Formula/mole.rb

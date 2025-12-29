@@ -50,7 +50,7 @@ ICON_ERROR="☻"
 log_info() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${BLUE}$1${NC}"; }
 log_success() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${GREEN}${ICON_SUCCESS}${NC} $1"; }
 log_warning() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${YELLOW}$1${NC}"; }
-log_error() { echo -e "${RED}${ICON_ERROR}${NC} $1"; }
+log_error() { echo -e "${YELLOW}${ICON_ERROR}${NC} $1"; }
 log_admin() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${BLUE}${ICON_ADMIN}${NC} $1"; }
 log_confirm() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${BLUE}${ICON_CONFIRM}${NC} $1"; }
 
@@ -179,7 +179,7 @@ get_installed_version() {
     if [[ -x "$binary" ]]; then
         # Try running the binary first (preferred method)
         local version
-        version=$("$binary" --version 2> /dev/null | awk 'NF {print $NF; exit}')
+        version=$("$binary" --version 2> /dev/null | awk '/Mole version/ {print $NF; exit}')
         if [[ -n "$version" ]]; then
             echo "$version"
         else
@@ -236,17 +236,35 @@ check_requirements() {
 
     # Check if already installed via Homebrew
     if command -v brew > /dev/null 2>&1 && brew list mole > /dev/null 2>&1; then
-        if [[ "$ACTION" == "update" ]]; then
-            return 0
+        # Verify that mole executable actually exists and is from Homebrew
+        local mole_path
+        mole_path=$(command -v mole 2> /dev/null || true)
+        local is_homebrew_binary=false
+
+        if [[ -n "$mole_path" && -L "$mole_path" ]]; then
+            if readlink "$mole_path" | grep -q "Cellar/mole"; then
+                is_homebrew_binary=true
+            fi
         fi
 
-        echo -e "${YELLOW}Mole is installed via Homebrew${NC}"
-        echo ""
-        echo "Choose one:"
-        echo -e "  1. Update via Homebrew: ${GREEN}brew upgrade mole${NC}"
-        echo -e "  2. Switch to manual: ${GREEN}brew uninstall mole${NC} then re-run this"
-        echo ""
-        exit 1
+        # Only block installation if Homebrew binary actually exists
+        if [[ "$is_homebrew_binary" == "true" ]]; then
+            if [[ "$ACTION" == "update" ]]; then
+                return 0
+            fi
+
+            echo -e "${YELLOW}Mole is installed via Homebrew${NC}"
+            echo ""
+            echo "Choose one:"
+            echo -e "  1. Update via Homebrew: ${GREEN}brew upgrade mole${NC}"
+            echo -e "  2. Switch to manual: ${GREEN}brew uninstall --force mole${NC} then re-run this"
+            echo ""
+            exit 1
+        else
+            # Brew has mole in database but binary doesn't exist - clean up
+            log_warning "Cleaning up stale Homebrew installation..."
+            brew uninstall --force mole > /dev/null 2>&1 || true
+        fi
     fi
 
     # Check if install directory exists and is writable
@@ -525,10 +543,12 @@ perform_update() {
     if command -v brew > /dev/null 2>&1 && brew list mole > /dev/null 2>&1; then
         # Try to use shared function if available (when running from installed Mole)
         resolve_source_dir 2> /dev/null || true
+        local current_version
+        current_version=$(get_installed_version || echo "unknown")
         if [[ -f "$SOURCE_DIR/lib/core/common.sh" ]]; then
             # shellcheck disable=SC1090,SC1091
             source "$SOURCE_DIR/lib/core/common.sh"
-            update_via_homebrew "$VERSION"
+            update_via_homebrew "$current_version"
         else
             # Fallback: inline implementation
             if [[ -t 1 ]]; then
@@ -553,9 +573,9 @@ perform_update() {
             fi
 
             if echo "$upgrade_output" | grep -q "already installed"; then
-                local current_version
-                current_version=$(brew list --versions mole 2> /dev/null | awk '{print $2}')
-                echo -e "${GREEN}✓${NC} Already on latest version (${current_version:-$VERSION})"
+                local brew_version
+                brew_version=$(brew list --versions mole 2> /dev/null | awk '{print $2}')
+                echo -e "${GREEN}✓${NC} Already on latest version (${brew_version:-$current_version})"
             elif echo "$upgrade_output" | grep -q "Error:"; then
                 log_error "Homebrew upgrade failed"
                 echo "$upgrade_output" | grep "Error:" >&2
@@ -564,7 +584,7 @@ perform_update() {
                 echo "$upgrade_output" | grep -Ev "^(==>|Updating Homebrew|Warning:)" || true
                 local new_version
                 new_version=$(brew list --versions mole 2> /dev/null | awk '{print $2}')
-                echo -e "${GREEN}✓${NC} Updated to latest version (${new_version:-$VERSION})"
+                echo -e "${GREEN}✓${NC} Updated to latest version (${new_version:-$current_version})"
             fi
 
             rm -f "$HOME/.cache/mole/version_check" "$HOME/.cache/mole/update_message"

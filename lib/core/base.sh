@@ -30,8 +30,8 @@ readonly NC="${ESC}[0m"
 readonly ICON_CONFIRM="◎"
 readonly ICON_ADMIN="⚙"
 readonly ICON_SUCCESS="✓"
-readonly ICON_ERROR="☹︎"
-readonly ICON_WARNING="☺︎"
+readonly ICON_ERROR="☻"
+readonly ICON_WARNING="●"
 readonly ICON_EMPTY="○"
 readonly ICON_SOLID="●"
 readonly ICON_LIST="•"
@@ -86,6 +86,12 @@ declare -a DEFAULT_WHITELIST_PATTERNS=(
     "$HOME/Library/Caches/com.jetbrains.toolbox*"
     "$HOME/Library/Caches/com.apple.finder"
     "$HOME/Library/Mobile Documents*"
+    # System-critical caches that affect macOS functionality and stability
+    # CRITICAL: Removing these will cause system search and UI issues
+    "$HOME/Library/Caches/com.apple.FontRegistry*"
+    "$HOME/Library/Caches/com.apple.spotlight*"
+    "$HOME/Library/Caches/com.apple.Spotlight*"
+    "$HOME/Library/Caches/CloudKit*"
     "$FINDER_METADATA_SENTINEL"
 )
 
