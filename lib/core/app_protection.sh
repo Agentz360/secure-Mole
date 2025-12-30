@@ -392,6 +392,35 @@ readonly DATA_PROTECTED_BUNDLES=(
     "com.synology.*"                 # Synology apps
 
     # ============================================================================
+    # Cloud Storage & Backup (Issue #204)
+    # ============================================================================
+    "com.dropbox.*"              # Dropbox
+    "com.getdropbox.*"           # Dropbox legacy
+    "*dropbox*"                  # Dropbox helpers/updaters
+    "ws.agile.*"                 # 1Password sync helpers
+    "com.backblaze.*"            # Backblaze
+    "*backblaze*"                # Backblaze helpers
+    "com.box.desktop*"           # Box
+    "*box.desktop*"              # Box helpers
+    "com.microsoft.OneDrive*"    # Microsoft OneDrive
+    "com.microsoft.SyncReporter" # OneDrive sync reporter
+    "*OneDrive*"                 # OneDrive helpers/updaters
+    "com.google.GoogleDrive"     # Google Drive
+    "com.google.keystone*"       # Google updaters (Drive, Chrome, etc.)
+    "*GoogleDrive*"              # Google Drive helpers
+    "com.amazon.drive"           # Amazon Drive
+    "com.apple.bird"             # iCloud Drive daemon
+    "com.apple.CloudDocs*"       # iCloud Documents
+    "com.displaylink.*"          # DisplayLink
+    "com.fujitsu.pfu.ScanSnap*"  # ScanSnap
+    "com.citrix.*"               # Citrix Workspace
+    "org.xquartz.*"              # XQuartz
+    "us.zoom.updater*"           # Zoom updaters
+    "com.DigiDNA.iMazing*"       # iMazing
+    "com.shirtpocket.*"          # SuperDuper backup
+    "homebrew.mxcl.*"            # Homebrew services
+
+    # ============================================================================
     # Screenshot & Recording
     # ============================================================================
     "com.cleanshot.*"                   # CleanShot X
@@ -613,14 +642,13 @@ is_path_whitelisted() {
     [[ ${#WHITELIST_PATTERNS[@]} -eq 0 ]] && return 1
 
     for pattern in "${WHITELIST_PATTERNS[@]}"; do
-        # Expand tilde in whitelist pattern for comparison
-        local expanded_pattern="${pattern/#\~/$HOME}"
-        expanded_pattern="${expanded_pattern%/}"
+        # Pattern is already expanded/normalized in bin/clean.sh
+        local check_pattern="${pattern%/}"
 
         # Check for exact match or glob pattern match
         # shellcheck disable=SC2053
-        if [[ "$normalized_target" == "$expanded_pattern" ]] ||
-            [[ "$normalized_target" == $expanded_pattern ]]; then
+        if [[ "$normalized_target" == "$check_pattern" ]] ||
+            [[ "$normalized_target" == $check_pattern ]]; then
             return 0
         fi
     done

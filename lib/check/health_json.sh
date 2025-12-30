@@ -122,12 +122,31 @@ EOF
     # Collect all optimization items
     local -a items=()
 
-    # Always-on items (no size checks - instant)
-    items+=('system_maintenance|System Database Maintenance|Rebuild LaunchServices, refresh DNS & verify Spotlight|true')
-    items+=('cache_refresh|Finder & Safari Cache Refresh|Refresh QuickLook, icon services & Safari caches|true')
-    items+=('maintenance_scripts|System Log Rotation|Rotate and compress system logs with newsyslog|true')
-    items+=('swap_cleanup|Virtual Memory Refresh|Reset swap files and dynamic pager service|true')
-    items+=('network_optimization|Network Stack Optimization|Refresh DNS, rebuild ARP & restart mDNSResponder|true')
+    # Core optimizations (safe and valuable)
+    items+=('system_maintenance|DNS & Spotlight Check|Refresh DNS cache & verify Spotlight status|true')
+    items+=('cache_refresh|Finder Cache Refresh|Refresh QuickLook thumbnails & icon services cache|true')
+    items+=('saved_state_cleanup|App State Cleanup|Remove old saved application states (30+ days)|true')
+    items+=('fix_broken_configs|Broken Config Repair|Fix corrupted preferences files|true')
+    items+=('network_optimization|Network Cache Refresh|Optimize DNS cache & restart mDNSResponder|true')
+
+    # Advanced optimizations (high value, auto-run with safety checks)
+    items+=('sqlite_vacuum|Database Optimization|Compress SQLite databases for Mail, Safari & Messages (skips if apps are running)|true')
+    items+=('launch_services_rebuild|LaunchServices Repair|Repair "Open with" menu & file associations|true')
+    items+=('font_cache_rebuild|Font Cache Rebuild|Rebuild font database to fix rendering issues|true')
+    items+=('dock_refresh|Dock Refresh|Fix broken icons and visual glitches in the Dock|true')
+
+    # System performance optimizations (new)
+    items+=('memory_pressure_relief|Memory Optimization|Release inactive memory to improve system responsiveness|true')
+    items+=('network_stack_optimize|Network Stack Refresh|Flush routing table and ARP cache to resolve network issues|true')
+    items+=('disk_permissions_repair|Permission Repair|Fix user directory permission issues|true')
+    items+=('bluetooth_reset|Bluetooth Refresh|Restart Bluetooth module to fix connectivity (skips if in use)|true')
+    items+=('spotlight_index_optimize|Spotlight Optimization|Rebuild index if search is slow (smart detection)|true')
+
+    # Removed high-risk optimizations:
+    # - startup_items_cleanup: Risk of deleting legitimate app helpers
+    # - system_services_refresh: Risk of data loss when killing system services
+    # - dyld_cache_update: Low benefit, time-consuming, auto-managed by macOS
+
     # Output items as JSON
     local first=true
     for item in "${items[@]}"; do

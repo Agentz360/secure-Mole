@@ -35,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash
 Or via Homebrew:
 
 ```bash
-brew install tw93/tap/mole
+brew install mole
 ```
 
 **Run:**
@@ -57,8 +57,10 @@ mo --version                 # Show installed version
 
 mo clean --dry-run           # Preview the cleanup plan
 mo clean --whitelist         # Manage protected caches
-mo uninstall --force-rescan  # Rescan applications and refresh cache
+
+mo optimize --dry-run        # Preview optimization actions
 mo optimize --whitelist      # Manage protected optimization rules
+mo purge --paths             # Configure project scan directories
 ```
 
 ## Tips
@@ -201,6 +203,21 @@ Select Categories to Clean - 18.5GB (8 selected)
 ```
 
 > **Use with caution:** This will permanently delete selected artifacts. Review carefully before confirming. Recent projects (< 7 days) are marked and unselected by default.
+
+<details>
+<summary><strong>Custom Scan Paths</strong></summary>
+
+Run `mo purge --paths` to configure which directories to scan, or edit `~/.config/mole/purge_paths` directly:
+
+```shell
+~/Documents/MyProjects
+~/Work/ClientA
+~/Work/ClientB
+```
+
+When custom paths are configured, only those directories are scanned. Otherwise, defaults to `~/Projects`, `~/GitHub`, `~/dev`, etc.
+
+</details>
 
 ## Quick Launchers
 

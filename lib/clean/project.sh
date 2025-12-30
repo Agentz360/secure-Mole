@@ -2,6 +2,14 @@
 # Project Purge Module (mo purge)
 # Removes heavy project build artifacts and dependencies
 set -euo pipefail
+
+PROJECT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CORE_LIB_DIR="$(cd "$PROJECT_LIB_DIR/../core" && pwd)"
+if ! command -v ensure_user_dir > /dev/null 2>&1; then
+    # shellcheck disable=SC1090
+    source "$CORE_LIB_DIR/common.sh"
+fi
+
 # Targets to look for (heavy build artifacts)
 readonly PURGE_TARGETS=(
     "node_modules"
@@ -26,8 +34,8 @@ readonly MIN_AGE_DAYS=7
 # Scan depth defaults (relative to search root)
 readonly PURGE_MIN_DEPTH_DEFAULT=2
 readonly PURGE_MAX_DEPTH_DEFAULT=8
-# Search paths (only project directories)
-readonly PURGE_SEARCH_PATHS=(
+# Search paths (default, can be overridden via config file)
+readonly DEFAULT_PURGE_SEARCH_PATHS=(
     "$HOME/www"
     "$HOME/dev"
     "$HOME/Projects"
@@ -37,6 +45,174 @@ readonly PURGE_SEARCH_PATHS=(
     "$HOME/Repos"
     "$HOME/Development"
 )
+
+# Config file for custom purge paths
+readonly PURGE_CONFIG_FILE="$HOME/.config/mole/purge_paths"
+
+# Global array to hold actual search paths
+PURGE_SEARCH_PATHS=()
+
+# Project indicator files (if a directory contains these, it's likely a project)
+readonly PROJECT_INDICATORS=(
+    "package.json"
+    "Cargo.toml"
+    "go.mod"
+    "pyproject.toml"
+    "requirements.txt"
+    "pom.xml"
+    "build.gradle"
+    "Gemfile"
+    "composer.json"
+    "pubspec.yaml"
+    "Makefile"
+    ".git"
+)
+
+# Check if a directory contains projects (directly or in subdirectories)
+is_project_container() {
+    local dir="$1"
+    local max_depth="${2:-2}"
+
+    # Skip hidden directories and system directories
+    local basename
+    basename=$(basename "$dir")
+    [[ "$basename" == .* ]] && return 1
+    [[ "$basename" == "Library" ]] && return 1
+    [[ "$basename" == "Applications" ]] && return 1
+    [[ "$basename" == "Movies" ]] && return 1
+    [[ "$basename" == "Music" ]] && return 1
+    [[ "$basename" == "Pictures" ]] && return 1
+    [[ "$basename" == "Public" ]] && return 1
+
+    # Build find expression with all indicators (single find call for efficiency)
+    local -a find_args=("$dir" "-maxdepth" "$max_depth" "(")
+    local first=true
+    for indicator in "${PROJECT_INDICATORS[@]}"; do
+        if [[ "$first" == "true" ]]; then
+            first=false
+        else
+            find_args+=("-o")
+        fi
+        find_args+=("-name" "$indicator")
+    done
+    find_args+=(")" "-print" "-quit")
+
+    # Single find call to check all indicators at once
+    if find "${find_args[@]}" 2> /dev/null | grep -q .; then
+        return 0
+    fi
+
+    return 1
+}
+
+# Discover project directories in $HOME
+discover_project_dirs() {
+    local -a discovered=()
+
+    # First check default paths that exist
+    for path in "${DEFAULT_PURGE_SEARCH_PATHS[@]}"; do
+        if [[ -d "$path" ]]; then
+            discovered+=("$path")
+        fi
+    done
+
+    # Then scan $HOME for other project containers (depth 1)
+    local dir
+    for dir in "$HOME"/*/; do
+        [[ ! -d "$dir" ]] && continue
+        dir="${dir%/}" # Remove trailing slash
+
+        # Skip if already in defaults
+        local already_found=false
+        for existing in "${DEFAULT_PURGE_SEARCH_PATHS[@]}"; do
+            if [[ "$dir" == "$existing" ]]; then
+                already_found=true
+                break
+            fi
+        done
+        [[ "$already_found" == "true" ]] && continue
+
+        # Check if this directory contains projects
+        if is_project_container "$dir" 2; then
+            discovered+=("$dir")
+        fi
+    done
+
+    # Return unique paths
+    printf '%s\n' "${discovered[@]}" | sort -u
+}
+
+# Save discovered paths to config
+save_discovered_paths() {
+    local -a paths=("$@")
+
+    ensure_user_dir "$(dirname "$PURGE_CONFIG_FILE")"
+
+    cat > "$PURGE_CONFIG_FILE" << 'EOF'
+# Mole Purge Paths - Auto-discovered project directories
+# Edit this file to customize, or run: mo purge --paths
+# Add one path per line (supports ~ for home directory)
+EOF
+
+    printf '\n' >> "$PURGE_CONFIG_FILE"
+    for path in "${paths[@]}"; do
+        # Convert $HOME to ~ for portability
+        path="${path/#$HOME/~}"
+        echo "$path" >> "$PURGE_CONFIG_FILE"
+    done
+}
+
+# Load purge paths from config or auto-discover
+load_purge_config() {
+    PURGE_SEARCH_PATHS=()
+
+    # Try loading from config file
+    if [[ -f "$PURGE_CONFIG_FILE" ]]; then
+        while IFS= read -r line; do
+            # Remove leading/trailing whitespace
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+
+            # Skip empty lines and comments
+            [[ -z "$line" || "$line" =~ ^# ]] && continue
+
+            # Expand tilde to HOME
+            line="${line/#\~/$HOME}"
+
+            PURGE_SEARCH_PATHS+=("$line")
+        done < "$PURGE_CONFIG_FILE"
+    fi
+
+    # If no paths loaded, auto-discover and save
+    if [[ ${#PURGE_SEARCH_PATHS[@]} -eq 0 ]]; then
+        # Show discovery message if running interactively
+        if [[ -t 1 ]] && [[ -z "${_PURGE_DISCOVERY_SILENT:-}" ]]; then
+            echo -e "${GRAY}First run: discovering project directories...${NC}" >&2
+        fi
+
+        local -a discovered=()
+        while IFS= read -r path; do
+            [[ -n "$path" ]] && discovered+=("$path")
+        done < <(discover_project_dirs)
+
+        if [[ ${#discovered[@]} -gt 0 ]]; then
+            PURGE_SEARCH_PATHS=("${discovered[@]}")
+            # Save for next time
+            save_discovered_paths "${discovered[@]}"
+
+            if [[ -t 1 ]] && [[ -z "${_PURGE_DISCOVERY_SILENT:-}" ]]; then
+                echo -e "${GRAY}Found ${#discovered[@]} project directories, saved to config${NC}" >&2
+            fi
+        else
+            # Fallback to defaults if nothing found
+            PURGE_SEARCH_PATHS=("${DEFAULT_PURGE_SEARCH_PATHS[@]}")
+        fi
+    fi
+}
+
+# Initialize paths on script load
+load_purge_config
+
 # Args: $1 - path to check
 # Check if path is safe to clean (must be inside a project directory)
 is_safe_project_artifact() {
@@ -211,6 +387,36 @@ select_purge_categories() {
     if [[ $total_items -eq 0 ]]; then
         return 1
     fi
+
+    # Calculate items per page based on terminal height
+    # Reserved: header(2) + blank(2) + footer(1) = 5 rows
+    _get_items_per_page() {
+        local term_height=24
+        if [[ -t 0 ]] || [[ -t 2 ]]; then
+            term_height=$(stty size < /dev/tty 2> /dev/null | awk '{print $1}')
+        fi
+        if [[ -z "$term_height" || $term_height -le 0 ]]; then
+            if command -v tput > /dev/null 2>&1; then
+                term_height=$(tput lines 2> /dev/null || echo "24")
+            else
+                term_height=24
+            fi
+        fi
+        local reserved=6
+        local available=$((term_height - reserved))
+        if [[ $available -lt 3 ]]; then
+            echo 3
+        elif [[ $available -gt 50 ]]; then
+            echo 50
+        else
+            echo "$available"
+        fi
+    }
+
+    local items_per_page=$(_get_items_per_page)
+    local cursor_pos=0
+    local top_index=0
+
     # Initialize selection (all selected by default, except recent ones)
     local -a selected=()
     IFS=',' read -r -a recent_flags <<< "${PURGE_RECENT_CATEGORIES:-}"
@@ -222,7 +428,6 @@ select_purge_categories() {
             selected[i]=true
         fi
     done
-    local cursor_pos=0
     local original_stty=""
     if [[ -t 0 ]] && command -v stty > /dev/null 2>&1; then
         original_stty=$(stty -g 2> /dev/null || echo "")
@@ -241,6 +446,30 @@ select_purge_categories() {
         exit 130
     }
     draw_menu() {
+        # Recalculate items_per_page dynamically to handle window resize
+        items_per_page=$(_get_items_per_page)
+
+        # Clamp pagination state to avoid cursor drifting out of view
+        local max_top_index=0
+        if [[ $total_items -gt $items_per_page ]]; then
+            max_top_index=$((total_items - items_per_page))
+        fi
+        if [[ $top_index -gt $max_top_index ]]; then
+            top_index=$max_top_index
+        fi
+        if [[ $top_index -lt 0 ]]; then
+            top_index=0
+        fi
+
+        local visible_count=$((total_items - top_index))
+        [[ $visible_count -gt $items_per_page ]] && visible_count=$items_per_page
+        if [[ $cursor_pos -gt $((visible_count - 1)) ]]; then
+            cursor_pos=$((visible_count - 1))
+        fi
+        if [[ $cursor_pos -lt 0 ]]; then
+            cursor_pos=0
+        fi
+
         printf "\033[H"
         # Calculate total size of selected items for header
         local selected_size=0
@@ -253,23 +482,46 @@ select_purge_categories() {
             fi
         done
         local selected_gb
-        selected_gb=$(echo "scale=1; $selected_size/1024/1024" | bc)
+        selected_gb=$(printf "%.1f" "$(echo "scale=2; $selected_size/1024/1024" | bc)")
+
+        # Show position indicator if scrolling is needed
+        local scroll_indicator=""
+        if [[ $total_items -gt $items_per_page ]]; then
+            local current_pos=$((top_index + cursor_pos + 1))
+            scroll_indicator=" ${GRAY}[${current_pos}/${total_items}]${NC}"
+        fi
+
         printf "%s\n" "$clear_line"
-        printf "%s${PURPLE_BOLD}Select Categories to Clean${NC} ${GRAY}- ${selected_gb}GB ($selected_count selected)${NC}\n" "$clear_line"
+        printf "%s${PURPLE_BOLD}Select Categories to Clean${NC}%s ${GRAY}- ${selected_gb}GB ($selected_count selected)${NC}\n" "$clear_line" "$scroll_indicator"
         printf "%s\n" "$clear_line"
+
         IFS=',' read -r -a recent_flags <<< "${PURGE_RECENT_CATEGORIES:-}"
-        for ((i = 0; i < total_items; i++)); do
+
+        # Calculate visible range
+        local end_index=$((top_index + visible_count))
+
+        # Draw only visible items
+        for ((i = top_index; i < end_index; i++)); do
             local checkbox="$ICON_EMPTY"
             [[ ${selected[i]} == true ]] && checkbox="$ICON_SOLID"
             local recent_marker=""
             [[ ${recent_flags[i]:-false} == "true" ]] && recent_marker=" ${GRAY}| Recent${NC}"
-            if [[ $i -eq $cursor_pos ]]; then
+            local rel_pos=$((i - top_index))
+            if [[ $rel_pos -eq $cursor_pos ]]; then
                 printf "%s${CYAN}${ICON_ARROW} %s %s%s${NC}\n" "$clear_line" "$checkbox" "${categories[i]}" "$recent_marker"
             else
                 printf "%s  %s %s%s\n" "$clear_line" "$checkbox" "${categories[i]}" "$recent_marker"
             fi
         done
+
+        # Fill empty slots to clear previous content
+        local items_shown=$visible_count
+        for ((i = items_shown; i < items_per_page; i++)); do
+            printf "%s\n" "$clear_line"
+        done
+
         printf "%s\n" "$clear_line"
+
         printf "%s${GRAY}${ICON_NAV_UP}${ICON_NAV_DOWN}  |  Space Select  |  Enter Confirm  |  A All  |  I Invert  |  Q Quit${NC}\n" "$clear_line"
     }
     trap restore_terminal EXIT
@@ -294,10 +546,24 @@ select_purge_categories() {
                     IFS= read -r -s -n1 -t 1 key3 || key3=""
                     case "$key3" in
                         A) # Up arrow
-                            ((cursor_pos > 0)) && ((cursor_pos--))
+                            if [[ $cursor_pos -gt 0 ]]; then
+                                ((cursor_pos--))
+                            elif [[ $top_index -gt 0 ]]; then
+                                ((top_index--))
+                            fi
                             ;;
                         B) # Down arrow
-                            ((cursor_pos < total_items - 1)) && ((cursor_pos++))
+                            local absolute_index=$((top_index + cursor_pos))
+                            local last_index=$((total_items - 1))
+                            if [[ $absolute_index -lt $last_index ]]; then
+                                local visible_count=$((total_items - top_index))
+                                [[ $visible_count -gt $items_per_page ]] && visible_count=$items_per_page
+                                if [[ $cursor_pos -lt $((visible_count - 1)) ]]; then
+                                    ((cursor_pos++))
+                                elif [[ $((top_index + visible_count)) -lt $total_items ]]; then
+                                    ((top_index++))
+                                fi
+                            fi
                             ;;
                     esac
                 else
@@ -307,10 +573,11 @@ select_purge_categories() {
                 fi
                 ;;
             " ") # Space - toggle current item
-                if [[ ${selected[cursor_pos]} == true ]]; then
-                    selected[cursor_pos]=false
+                local idx=$((top_index + cursor_pos))
+                if [[ ${selected[idx]} == true ]]; then
+                    selected[idx]=false
                 else
-                    selected[cursor_pos]=true
+                    selected[idx]=true
                 fi
                 ;;
             "a" | "A") # Select all
@@ -432,10 +699,31 @@ clean_project_artifacts() {
     local -a item_recent_flags=()
     # Helper to get project name from path
     # For ~/www/pake/src-tauri/target -> returns "pake"
-    # For ~/www/project/node_modules/xxx/node_modules -> returns "project"
+    # For ~/work/code/MyProject/node_modules -> returns "MyProject"
+    # Strategy: Find the nearest ancestor directory containing a project indicator file
     get_project_name() {
         local path="$1"
-        # Find the project root by looking for direct child of search paths
+        local artifact_name
+        artifact_name=$(basename "$path")
+
+        # Start from the parent of the artifact and walk up
+        local current_dir
+        current_dir=$(dirname "$path")
+
+        while [[ "$current_dir" != "/" && "$current_dir" != "$HOME" && -n "$current_dir" ]]; do
+            # Check if current directory contains any project indicator
+            for indicator in "${PROJECT_INDICATORS[@]}"; do
+                if [[ -e "$current_dir/$indicator" ]]; then
+                    # Found a project root, return its name
+                    basename "$current_dir"
+                    return 0
+                fi
+            done
+            # Move up one level
+            current_dir=$(dirname "$current_dir")
+        done
+
+        # Fallback: try the old logic (first directory under search root)
         local search_roots=()
         if [[ ${#PURGE_SEARCH_PATHS[@]} -gt 0 ]]; then
             search_roots=("${PURGE_SEARCH_PATHS[@]}")
@@ -443,17 +731,15 @@ clean_project_artifacts() {
             search_roots=("$HOME/www" "$HOME/dev" "$HOME/Projects")
         fi
         for root in "${search_roots[@]}"; do
-            # Normalize trailing slash for consistent matching
             root="${root%/}"
             if [[ -n "$root" && "$path" == "$root/"* ]]; then
-                # Remove root prefix and get first directory component
                 local relative_path="${path#"$root"/}"
-                # Extract first directory name
                 echo "$relative_path" | cut -d'/' -f1
                 return 0
             fi
         done
-        # Fallback: use grandparent directory
+
+        # Final fallback: use grandparent directory
         dirname "$(dirname "$path")" | xargs basename
     }
     # Format display with alignment (like app_selector)
