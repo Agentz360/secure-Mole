@@ -1,16 +1,16 @@
 #!/bin/bash
-# Mole Installation Script
+# Mole - Installer for manual installs.
+# Fetches source/binaries and installs to prefix.
+# Supports update and edge installs.
 
 set -euo pipefail
 
-# Colors
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-# Simple spinner
 _SPINNER_PID=""
 start_line_spinner() {
     local msg="$1"
@@ -36,17 +36,15 @@ stop_line_spinner() { if [[ -n "$_SPINNER_PID" ]]; then
     printf "\r\033[K"
 fi; }
 
-# Verbosity (0 = quiet, 1 = verbose)
 VERBOSE=1
 
-# Icons (duplicated from lib/core/common.sh - necessary as install.sh runs standalone)
-# Note: Don't use 'readonly' here to avoid conflicts when sourcing common.sh later
+# Icons duplicated from lib/core/common.sh (install.sh runs standalone).
+# Avoid readonly to prevent conflicts when sourcing common.sh later.
 ICON_SUCCESS="✓"
 ICON_ADMIN="●"
 ICON_CONFIRM="◎"
 ICON_ERROR="☻"
 
-# Logging functions
 log_info() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${BLUE}$1${NC}"; }
 log_success() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${GREEN}${ICON_SUCCESS}${NC} $1"; }
 log_warning() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${YELLOW}$1${NC}"; }
@@ -54,21 +52,18 @@ log_error() { echo -e "${YELLOW}${ICON_ERROR}${NC} $1"; }
 log_admin() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${BLUE}${ICON_ADMIN}${NC} $1"; }
 log_confirm() { [[ ${VERBOSE} -eq 1 ]] && echo -e "${BLUE}${ICON_CONFIRM}${NC} $1"; }
 
-# Default installation directory
+# Install defaults
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="$HOME/.config/mole"
 SOURCE_DIR=""
 
-# Default action (install|update)
 ACTION="install"
 
-# Check if we need sudo for install directory operations
+# Resolve source dir (local checkout, env override, or download).
 needs_sudo() {
-    [[ "$INSTALL_DIR" == "/usr/local/bin" ]] && [[ ! -w "$INSTALL_DIR" ]]
+    [[ ! -w "$INSTALL_DIR" ]]
 }
 
-# Execute command with sudo if needed
-# Usage: maybe_sudo cp source dest
 maybe_sudo() {
     if needs_sudo; then
         sudo "$@"
@@ -77,42 +72,11 @@ maybe_sudo() {
     fi
 }
 
-show_help() {
-    cat << 'EOF'
-Mole Installation Script
-========================
-
-USAGE:
-    ./install.sh [OPTIONS]
-
-OPTIONS:
-    --prefix PATH       Install to custom directory (default: /usr/local/bin)
-    --config PATH       Config directory (default: ~/.config/mole)
-    --update            Update Mole to the latest version
-    --uninstall         Uninstall mole
-    --help, -h          Show this help
-
-EXAMPLES:
-    ./install.sh                    # Install to /usr/local/bin
-    ./install.sh --prefix ~/.local/bin  # Install to custom directory
-    ./install.sh --update           # Update Mole in place
-    ./install.sh --uninstall       # Uninstall mole
-
-The installer will:
-1. Copy mole binary and scripts to the install directory
-2. Set up config directory with all modules
-3. Make the mole command available system-wide
-EOF
-    echo ""
-}
-
-# Resolve the directory containing source files (supports curl | bash)
 resolve_source_dir() {
     if [[ -n "$SOURCE_DIR" && -d "$SOURCE_DIR" && -f "$SOURCE_DIR/mole" ]]; then
         return 0
     fi
 
-    # 1) If script is on disk, use its directory (only when mole executable present)
     if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
         local script_dir
         script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -122,17 +86,14 @@ resolve_source_dir() {
         fi
     fi
 
-    # 2) If CLEAN_SOURCE_DIR env is provided, honor it
     if [[ -n "${CLEAN_SOURCE_DIR:-}" && -d "$CLEAN_SOURCE_DIR" && -f "$CLEAN_SOURCE_DIR/mole" ]]; then
         SOURCE_DIR="$CLEAN_SOURCE_DIR"
         return 0
     fi
 
-    # 3) Fallback: fetch repository to a temp directory (works for curl | bash)
     local tmp
     tmp="$(mktemp -d)"
-    # Expand tmp now so trap doesn't depend on local scope
-    trap "rm -rf '$tmp'" EXIT
+    trap "stop_line_spinner 2>/dev/null; rm -rf '$tmp'" EXIT
 
     local branch="${MOLE_VERSION:-}"
     if [[ -z "$branch" ]]; then
@@ -149,7 +110,6 @@ resolve_source_dir() {
     fi
     local url="https://github.com/tw93/mole/archive/refs/heads/main.tar.gz"
 
-    # If a specific version is requested (e.g. V1.0.0), use the tag URL
     if [[ "$branch" != "main" ]]; then
         url="https://github.com/tw93/mole/archive/refs/tags/${branch}.tar.gz"
     fi
@@ -160,8 +120,6 @@ resolve_source_dir() {
             if tar -xzf "$tmp/mole.tar.gz" -C "$tmp" 2> /dev/null; then
                 stop_line_spinner
 
-                # Find the extracted directory (name varies by tag/branch)
-                # It usually looks like Mole-main, mole-main, Mole-1.0.0, etc.
                 local extracted_dir
                 extracted_dir=$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -n 1)
 
@@ -199,6 +157,7 @@ resolve_source_dir() {
     exit 1
 }
 
+# Version helpers
 get_source_version() {
     local source_mole="$SOURCE_DIR/mole"
     if [[ -f "$source_mole" ]]; then
@@ -217,7 +176,6 @@ get_latest_release_tag() {
     if [[ -z "$tag" ]]; then
         return 1
     fi
-    # Return tag as-is; normalize_release_tag will handle standardization
     printf '%s\n' "$tag"
 }
 
@@ -234,7 +192,6 @@ get_latest_release_tag_from_git() {
 
 normalize_release_tag() {
     local tag="$1"
-    # Remove all leading 'v' or 'V' prefixes (handle edge cases like VV1.0.0)
     while [[ "$tag" =~ ^[vV] ]]; do
         tag="${tag#v}"
         tag="${tag#V}"
@@ -247,27 +204,79 @@ normalize_release_tag() {
 get_installed_version() {
     local binary="$INSTALL_DIR/mole"
     if [[ -x "$binary" ]]; then
-        # Try running the binary first (preferred method)
         local version
         version=$("$binary" --version 2> /dev/null | awk '/Mole version/ {print $NF; exit}')
         if [[ -n "$version" ]]; then
             echo "$version"
         else
-            # Fallback: parse VERSION from file (in case binary is broken)
             sed -n 's/^VERSION="\(.*\)"$/\1/p' "$binary" | head -n1
         fi
     fi
 }
 
-# Parse command line arguments
+# CLI parsing (supports main/latest and version tokens).
 parse_args() {
+    local -a args=("$@")
+    local version_token=""
+    local i skip_next=false
+    for i in "${!args[@]}"; do
+        local token="${args[$i]}"
+        [[ -z "$token" ]] && continue
+        # Skip values for options that take arguments
+        if [[ "$skip_next" == "true" ]]; then
+            skip_next=false
+            continue
+        fi
+        if [[ "$token" == "--prefix" || "$token" == "--config" ]]; then
+            skip_next=true
+            continue
+        fi
+        if [[ "$token" == -* ]]; then
+            continue
+        fi
+        if [[ -n "$version_token" ]]; then
+            log_error "Unexpected argument: $token"
+            exit 1
+        fi
+        case "$token" in
+            latest | main)
+                export MOLE_VERSION="main"
+                export MOLE_EDGE_INSTALL="true"
+                version_token="$token"
+                unset 'args[$i]'
+                ;;
+            [0-9]* | V[0-9]* | v[0-9]*)
+                export MOLE_VERSION="$token"
+                version_token="$token"
+                unset 'args[$i]'
+                ;;
+            *)
+                log_error "Unknown option: $token"
+                exit 1
+                ;;
+        esac
+    done
+    if [[ ${#args[@]} -gt 0 ]]; then
+        set -- ${args[@]+"${args[@]}"}
+    else
+        set --
+    fi
+
     while [[ $# -gt 0 ]]; do
         case $1 in
             --prefix)
+                if [[ -z "${2:-}" ]]; then
+                    log_error "Missing value for --prefix"
+                    exit 1
+                fi
                 INSTALL_DIR="$2"
                 shift 2
                 ;;
             --config)
+                if [[ -z "${2:-}" ]]; then
+                    log_error "Missing value for --config"
+                    exit 1
+                fi
                 CONFIG_DIR="$2"
                 shift 2
                 ;;
@@ -275,38 +284,30 @@ parse_args() {
                 ACTION="update"
                 shift 1
                 ;;
-            --uninstall)
-                uninstall_mole
-                exit 0
-                ;;
             --verbose | -v)
                 VERBOSE=1
                 shift 1
                 ;;
             --help | -h)
-                show_help
-                exit 0
+                log_error "Unknown option: $1"
+                exit 1
                 ;;
             *)
                 log_error "Unknown option: $1"
-                show_help
                 exit 1
                 ;;
         esac
     done
 }
 
-# Check system requirements
+# Environment checks and directory setup
 check_requirements() {
-    # Check if running on macOS
     if [[ "$OSTYPE" != "darwin"* ]]; then
         log_error "This tool is designed for macOS only"
         exit 1
     fi
 
-    # Check if already installed via Homebrew
     if command -v brew > /dev/null 2>&1 && brew list mole > /dev/null 2>&1; then
-        # Verify that mole executable actually exists and is from Homebrew
         local mole_path
         mole_path=$(command -v mole 2> /dev/null || true)
         local is_homebrew_binary=false
@@ -317,7 +318,6 @@ check_requirements() {
             fi
         fi
 
-        # Only block installation if Homebrew binary actually exists
         if [[ "$is_homebrew_binary" == "true" ]]; then
             if [[ "$ACTION" == "update" ]]; then
                 return 0
@@ -331,34 +331,30 @@ check_requirements() {
             echo ""
             exit 1
         else
-            # Brew has mole in database but binary doesn't exist - clean up
             log_warning "Cleaning up stale Homebrew installation..."
             brew uninstall --force mole > /dev/null 2>&1 || true
         fi
     fi
 
-    # Check if install directory exists and is writable
     if [[ ! -d "$(dirname "$INSTALL_DIR")" ]]; then
         log_error "Parent directory $(dirname "$INSTALL_DIR") does not exist"
         exit 1
     fi
 }
 
-# Create installation directories
 create_directories() {
-    # Create install directory if it doesn't exist
     if [[ ! -d "$INSTALL_DIR" ]]; then
         maybe_sudo mkdir -p "$INSTALL_DIR"
     fi
 
-    # Create config directory
-    mkdir -p "$CONFIG_DIR"
-    mkdir -p "$CONFIG_DIR/bin"
-    mkdir -p "$CONFIG_DIR/lib"
+    if ! mkdir -p "$CONFIG_DIR" "$CONFIG_DIR/bin" "$CONFIG_DIR/lib"; then
+        log_error "Failed to create config directory: $CONFIG_DIR"
+        exit 1
+    fi
 
 }
 
-# Build binary locally from source when download isn't available
+# Binary install helpers
 build_binary_from_source() {
     local binary_name="$1"
     local target_path="$2"
@@ -402,7 +398,6 @@ build_binary_from_source() {
     return 1
 }
 
-# Download binary from release
 download_binary() {
     local binary_name="$1"
     local target_path="$CONFIG_DIR/bin/${binary_name}-go"
@@ -413,8 +408,6 @@ download_binary() {
         arch_suffix="arm64"
     fi
 
-    # Try to use local binary first (from build or source)
-    # Check for both standard name and cross-compiled name
     if [[ -f "$SOURCE_DIR/bin/${binary_name}-go" ]]; then
         cp "$SOURCE_DIR/bin/${binary_name}-go" "$target_path"
         chmod +x "$target_path"
@@ -427,7 +420,6 @@ download_binary() {
         return 0
     fi
 
-    # Fallback to download
     local version
     version=$(get_source_version)
     if [[ -z "$version" ]]; then
@@ -439,9 +431,7 @@ download_binary() {
     fi
     local url="https://github.com/tw93/mole/releases/download/V${version}/${binary_name}-darwin-${arch_suffix}"
 
-    # Only attempt download if we have internet
-    # Note: Skip network check and let curl download handle connectivity issues
-    # This avoids false negatives from strict 2-second timeout
+    # Skip preflight network checks to avoid false negatives.
 
     if [[ -t 1 ]]; then
         start_line_spinner "Downloading ${binary_name}..."
@@ -464,7 +454,7 @@ download_binary() {
     fi
 }
 
-# Install files
+# File installation (bin/lib/scripts + go helpers).
 install_files() {
 
     resolve_source_dir
@@ -476,7 +466,6 @@ install_files() {
     install_dir_abs="$(cd "$INSTALL_DIR" && pwd)"
     config_dir_abs="$(cd "$CONFIG_DIR" && pwd)"
 
-    # Copy main executable when destination differs
     if [[ -f "$SOURCE_DIR/mole" ]]; then
         if [[ "$source_dir_abs" != "$install_dir_abs" ]]; then
             if needs_sudo; then
@@ -491,7 +480,6 @@ install_files() {
         exit 1
     fi
 
-    # Install mo alias for Mole if available
     if [[ -f "$SOURCE_DIR/mo" ]]; then
         if [[ "$source_dir_abs" == "$install_dir_abs" ]]; then
             log_success "mo alias already present"
@@ -502,16 +490,20 @@ install_files() {
         fi
     fi
 
-    # Copy configuration and modules
     if [[ -d "$SOURCE_DIR/bin" ]]; then
         local source_bin_abs="$(cd "$SOURCE_DIR/bin" && pwd)"
         local config_bin_abs="$(cd "$CONFIG_DIR/bin" && pwd)"
         if [[ "$source_bin_abs" == "$config_bin_abs" ]]; then
             log_success "Modules already synced"
         else
-            cp -r "$SOURCE_DIR/bin"/* "$CONFIG_DIR/bin/"
-            chmod +x "$CONFIG_DIR/bin"/*
-            log_success "Installed modules"
+            local -a bin_files=("$SOURCE_DIR/bin"/*)
+            if [[ ${#bin_files[@]} -gt 0 ]]; then
+                cp -r "${bin_files[@]}" "$CONFIG_DIR/bin/"
+                for file in "$CONFIG_DIR/bin/"*; do
+                    [[ -e "$file" ]] && chmod +x "$file"
+                done
+                log_success "Installed modules"
+            fi
         fi
     fi
 
@@ -521,12 +513,14 @@ install_files() {
         if [[ "$source_lib_abs" == "$config_lib_abs" ]]; then
             log_success "Libraries already synced"
         else
-            cp -r "$SOURCE_DIR/lib"/* "$CONFIG_DIR/lib/"
-            log_success "Installed libraries"
+            local -a lib_files=("$SOURCE_DIR/lib"/*)
+            if [[ ${#lib_files[@]} -gt 0 ]]; then
+                cp -r "${lib_files[@]}" "$CONFIG_DIR/lib/"
+                log_success "Installed libraries"
+            fi
         fi
     fi
 
-    # Copy other files if they exist and directories differ
     if [[ "$config_dir_abs" != "$source_dir_abs" ]]; then
         for file in README.md LICENSE install.sh; do
             if [[ -f "$SOURCE_DIR/$file" ]]; then
@@ -539,12 +533,10 @@ install_files() {
         chmod +x "$CONFIG_DIR/install.sh"
     fi
 
-    # Update the mole script to use the config directory when installed elsewhere
     if [[ "$source_dir_abs" != "$install_dir_abs" ]]; then
         maybe_sudo sed -i '' "s|SCRIPT_DIR=.*|SCRIPT_DIR=\"$CONFIG_DIR\"|" "$INSTALL_DIR/mole"
     fi
 
-    # Install/Download Go binaries
     if ! download_binary "analyze"; then
         exit 1
     fi
@@ -553,12 +545,11 @@ install_files() {
     fi
 }
 
-# Verify installation
+# Verification and PATH hint
 verify_installation() {
 
     if [[ -x "$INSTALL_DIR/mole" ]] && [[ -f "$CONFIG_DIR/lib/core/common.sh" ]]; then
 
-        # Test if mole command works
         if "$INSTALL_DIR/mole" --help > /dev/null 2>&1; then
             return 0
         else
@@ -570,14 +561,11 @@ verify_installation() {
     fi
 }
 
-# Add to PATH if needed
 setup_path() {
-    # Check if install directory is in PATH
     if [[ ":$PATH:" == *":$INSTALL_DIR:"* ]]; then
         return
     fi
 
-    # Only suggest PATH setup for custom directories
     if [[ "$INSTALL_DIR" != "/usr/local/bin" ]]; then
         log_warning "$INSTALL_DIR is not in your PATH"
         echo ""
@@ -635,71 +623,7 @@ print_usage_summary() {
     echo ""
 }
 
-# Uninstall function
-uninstall_mole() {
-    log_confirm "Uninstalling Mole"
-    echo ""
-
-    # Remove executable
-    if [[ -f "$INSTALL_DIR/mole" ]]; then
-        if needs_sudo; then
-            log_admin "Admin access required"
-        fi
-        maybe_sudo rm -f "$INSTALL_DIR/mole"
-        log_success "Removed mole executable"
-    fi
-
-    if [[ -f "$INSTALL_DIR/mo" ]]; then
-        maybe_sudo rm -f "$INSTALL_DIR/mo"
-        log_success "Removed mo alias"
-    fi
-
-    # SAFETY CHECK: Verify config directory is safe to remove
-    # Only allow removal of mole-specific directories
-    local is_safe=0
-
-    # Additional safety: never delete system critical paths (check first)
-    case "$CONFIG_DIR" in
-        / | /usr | /usr/local | /usr/local/bin | /usr/local/lib | /usr/local/share | \
-            /Library | /System | /bin | /sbin | /etc | /var | /opt | "$HOME" | "$HOME/Library" | \
-            /usr/local/lib/* | /usr/local/share/* | /Library/* | /System/*)
-            is_safe=0
-            ;;
-        *)
-            # Safe patterns: must be in user's home and end with 'mole'
-            if [[ "$CONFIG_DIR" == "$HOME/.config/mole" ]] ||
-                [[ "$CONFIG_DIR" == "$HOME"/.*/mole ]]; then
-                is_safe=1
-            fi
-            ;;
-    esac
-
-    # Ask before removing config directory
-    if [[ -d "$CONFIG_DIR" ]]; then
-        if [[ $is_safe -eq 0 ]]; then
-            log_warning "Config directory $CONFIG_DIR is not safe to auto-remove"
-            log_warning "Skipping automatic removal for safety"
-            echo ""
-            echo "Please manually review and remove mole-specific files from:"
-            echo "  $CONFIG_DIR"
-        else
-            echo ""
-            read -p "Remove configuration directory $CONFIG_DIR? (y/N): " -n 1 -r
-            echo ""
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                rm -rf "$CONFIG_DIR"
-                log_success "Removed configuration"
-            else
-                log_success "Configuration preserved"
-            fi
-        fi
-    fi
-
-    echo ""
-    log_confirm "Mole uninstalled successfully"
-}
-
-# Main installation function
+# Main install/update flows
 perform_install() {
     resolve_source_dir
     local source_version
@@ -718,6 +642,14 @@ perform_install() {
         installed_version="$source_version"
     fi
 
+    # Edge installs get a suffix to make the version explicit.
+    if [[ "${MOLE_EDGE_INSTALL:-}" == "true" ]]; then
+        installed_version="${installed_version}-edge"
+        echo ""
+        log_warning "Edge version installed on main branch"
+        log_info "This is a testing version; use 'mo update' to switch to stable"
+    fi
+
     print_usage_summary "installed" "$installed_version"
 }
 
@@ -725,7 +657,6 @@ perform_update() {
     check_requirements
 
     if command -v brew > /dev/null 2>&1 && brew list mole > /dev/null 2>&1; then
-        # Try to use shared function if available (when running from installed Mole)
         resolve_source_dir 2> /dev/null || true
         local current_version
         current_version=$(get_installed_version || echo "unknown")
@@ -734,44 +665,11 @@ perform_update() {
             source "$SOURCE_DIR/lib/core/common.sh"
             update_via_homebrew "$current_version"
         else
-            # Fallback: inline implementation
-            if [[ -t 1 ]]; then
-                start_line_spinner "Updating Homebrew..."
-            else
-                echo "Updating Homebrew..."
-            fi
-            brew update 2>&1 | grep -Ev "^(==>|Already up-to-date)" || true
-            if [[ -t 1 ]]; then
-                stop_line_spinner
-            fi
-
-            if [[ -t 1 ]]; then
-                start_line_spinner "Upgrading Mole..."
-            else
-                echo "Upgrading Mole..."
-            fi
-            local upgrade_output
-            upgrade_output=$(brew upgrade mole 2>&1) || true
-            if [[ -t 1 ]]; then
-                stop_line_spinner
-            fi
-
-            if echo "$upgrade_output" | grep -q "already installed"; then
-                local brew_version
-                brew_version=$(brew list --versions mole 2> /dev/null | awk '{print $2}')
-                echo -e "${GREEN}✓${NC} Already on latest version (${brew_version:-$current_version})"
-            elif echo "$upgrade_output" | grep -q "Error:"; then
-                log_error "Homebrew upgrade failed"
-                echo "$upgrade_output" | grep "Error:" >&2
-                exit 1
-            else
-                echo "$upgrade_output" | grep -Ev "^(==>|Updating Homebrew|Warning:)" || true
-                local new_version
-                new_version=$(brew list --versions mole 2> /dev/null | awk '{print $2}')
-                echo -e "${GREEN}✓${NC} Updated to latest version (${new_version:-$current_version})"
-            fi
-
-            rm -f "$HOME/.cache/mole/version_check" "$HOME/.cache/mole/update_message"
+            log_error "Cannot update Homebrew-managed Mole without full installation"
+            echo ""
+            echo "Please update via Homebrew:"
+            echo -e "  ${GREEN}brew upgrade mole${NC}"
+            exit 1
         fi
         exit 0
     fi
@@ -795,11 +693,10 @@ perform_update() {
     fi
 
     if [[ "$installed_version" == "$target_version" ]]; then
-        echo -e "${GREEN}✓${NC} Already on latest version ($installed_version)"
+        echo -e "${GREEN}${ICON_SUCCESS}${NC} Already on latest version ($installed_version)"
         exit 0
     fi
 
-    # Update with minimal output (suppress info/success, show errors only)
     local old_verbose=$VERBOSE
     VERBOSE=0
     create_directories || {
@@ -827,10 +724,9 @@ perform_update() {
         updated_version="$target_version"
     fi
 
-    echo -e "${GREEN}✓${NC} Updated to latest version ($updated_version)"
+    echo -e "${GREEN}${ICON_SUCCESS}${NC} Updated to latest version ($updated_version)"
 }
 
-# Run requested action
 parse_args "$@"
 
 case "$ACTION" in
