@@ -82,6 +82,7 @@ declare -a DEFAULT_WHITELIST_PATTERNS=(
     "$HOME/Library/Caches/com.nssurge.surge-mac/*"
     "$HOME/Library/Application Support/com.nssurge.surge-mac/*"
     "$HOME/Library/Caches/org.R-project.R/R/renv/*"
+    "$HOME/Library/Caches/pypoetry/virtualenvs*"
     "$HOME/Library/Caches/JetBrains*"
     "$HOME/Library/Caches/com.jetbrains.toolbox*"
     "$HOME/Library/Caches/com.apple.finder"
@@ -171,7 +172,12 @@ detect_architecture() {
 # Get free disk space on root volume
 # Returns: human-readable string (e.g., "100G")
 get_free_space() {
-    command df -h / | awk 'NR==2 {print $4}'
+    local target="/"
+    if [[ -d "/System/Volumes/Data" ]]; then
+        target="/System/Volumes/Data"
+    fi
+
+    df -h "$target" | awk 'NR==2 {print $4}'
 }
 
 # Get Darwin kernel major version (e.g., 24 for 24.2.0)
