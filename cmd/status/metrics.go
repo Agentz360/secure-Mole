@@ -37,11 +37,12 @@ type MetricsSnapshot struct {
 }
 
 type HardwareInfo struct {
-	Model     string // MacBook Pro 14-inch, 2021
-	CPUModel  string // Apple M1 Pro / Intel Core i7
-	TotalRAM  string // 16GB
-	DiskSize  string // 512GB
-	OSVersion string // macOS Sonoma 14.5
+	Model       string // MacBook Pro 14-inch, 2021
+	CPUModel    string // Apple M1 Pro / Intel Core i7
+	TotalRAM    string // 16GB
+	DiskSize    string // 512GB
+	OSVersion   string // macOS Sonoma 14.5
+	RefreshRate string // 120Hz / 60Hz
 }
 
 type DiskIOStatus struct {
@@ -83,6 +84,7 @@ type MemoryStatus struct {
 	UsedPercent float64
 	SwapUsed    uint64
 	SwapTotal   uint64
+	Cached      uint64 // File cache that can be freed if needed
 	Pressure    string // macOS memory pressure: normal/warn/critical
 }
 
@@ -115,6 +117,7 @@ type BatteryStatus struct {
 	TimeLeft   string
 	Health     string
 	CycleCount int
+	Capacity   int // Maximum capacity percentage (e.g., 85 means 85% of original)
 }
 
 type ThermalStatus struct {

@@ -200,7 +200,7 @@ is_cache_valid() {
         return 1
     fi
 
-    local cache_age=$(($(date +%s) - $(get_file_mtime "$cache_file")))
+    local cache_age=$(($(get_epoch_seconds) - $(get_file_mtime "$cache_file")))
     [[ $cache_age -lt $ttl ]]
 }
 
@@ -248,7 +248,7 @@ check_macos_update() {
             spinner_started=true
         fi
 
-        local softwareupdate_timeout="${MO_SOFTWAREUPDATE_TIMEOUT:-10}"
+        local softwareupdate_timeout=10
         if sw_output=$(run_with_timeout "$softwareupdate_timeout" softwareupdate -l --no-scan 2> /dev/null); then
             :
         else

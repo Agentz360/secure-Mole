@@ -214,18 +214,86 @@ is_safe_project_artifact() {
     fi
     # Must not be a direct child of the search root.
     local relative_path="${path#"$search_path"/}"
-    local depth=$(echo "$relative_path" | tr -cd '/' | wc -c)
+    local depth=$(echo "$relative_path" | LC_ALL=C tr -cd '/' | wc -c)
     if [[ $depth -lt 1 ]]; then
         return 1
     fi
     return 0
 }
+
+# Detect if directory is a Rails project root
+is_rails_project_root() {
+    local dir="$1"
+    [[ -f "$dir/config/application.rb" ]] || return 1
+    [[ -f "$dir/Gemfile" ]] || return 1
+    [[ -f "$dir/bin/rails" || -f "$dir/config/environment.rb" ]]
+}
+
+# Detect if directory is a Go project root
+is_go_project_root() {
+    local dir="$1"
+    [[ -f "$dir/go.mod" ]]
+}
+
+# Detect if directory is a PHP Composer project root
+is_php_project_root() {
+    local dir="$1"
+    [[ -f "$dir/composer.json" ]]
+}
+
+# Check if a vendor directory should be protected from purge
+# Expects path to be a vendor directory (basename == vendor)
+# Strategy: Only clean PHP Composer vendor, protect all others
+is_protected_vendor_dir() {
+    local path="$1"
+    local base
+    base=$(basename "$path")
+    [[ "$base" == "vendor" ]] || return 1
+    local parent_dir
+    parent_dir=$(dirname "$path")
+
+    # PHP Composer vendor can be safely regenerated with 'composer install'
+    # Do NOT protect it (return 1 = not protected = can be cleaned)
+    if is_php_project_root "$parent_dir"; then
+        return 1
+    fi
+
+    # Rails vendor (importmap dependencies) - should be protected
+    if is_rails_project_root "$parent_dir"; then
+        return 0
+    fi
+
+    # Go vendor (optional vendoring) - protect to avoid accidental deletion
+    if is_go_project_root "$parent_dir"; then
+        return 0
+    fi
+
+    # Unknown vendor type - protect by default (conservative approach)
+    return 0
+}
+
+# Check if an artifact should be protected from purge
+is_protected_purge_artifact() {
+    local path="$1"
+    local base
+    base=$(basename "$path")
+
+    case "$base" in
+        vendor)
+            is_protected_vendor_dir "$path"
+            return $?
+            ;;
+    esac
+
+    return 1
+}
+
 # Scan purge targets using fd (fast) or pruned find.
 scan_purge_targets() {
     local search_path="$1"
     local output_file="$2"
-    local min_depth="${MOLE_PURGE_MIN_DEPTH:-$PURGE_MIN_DEPTH_DEFAULT}"
-    local max_depth="${MOLE_PURGE_MAX_DEPTH:-$PURGE_MAX_DEPTH_DEFAULT}"
+    local min_depth="$PURGE_MIN_DEPTH_DEFAULT"
+    local max_depth="$PURGE_MAX_DEPTH_DEFAULT"
     if [[ ! "$min_depth" =~ ^[0-9]+$ ]]; then
         min_depth="$PURGE_MIN_DEPTH_DEFAULT"
     fi
@@ -239,6 +307,15 @@ scan_purge_targets() {
         return
     fi
     if command -v fd > /dev/null 2>&1; then
+        # Escape regex special characters in target names for fd patterns
+        local escaped_targets=()
+        for target in "${PURGE_TARGETS[@]}"; do
+            escaped_targets+=("$(printf '%s' "$target" | sed -e 's/[][(){}.^$*+?|\\]/\\&/g')")
+        done
+        local pattern="($(
+            IFS='|'
+            echo "${escaped_targets[*]}"
+        ))"
         local fd_args=(
             "--absolute-path"
             "--hidden"
@@ -252,14 +329,11 @@ scan_purge_targets() {
             "--exclude" ".Trash"
             "--exclude" "Applications"
         )
-        for target in "${PURGE_TARGETS[@]}"; do
-            fd_args+=("-g" "$target")
-        done
-        fd "${fd_args[@]}" . "$search_path" 2> /dev/null | while IFS= read -r item; do
+        fd "${fd_args[@]}" "$pattern" "$search_path" 2> /dev/null | while IFS= read -r item; do
             if is_safe_project_artifact "$item" "$search_path"; then
                 echo "$item"
             fi
-        done | filter_nested_artifacts > "$output_file"
+        done | filter_nested_artifacts | filter_protected_artifacts > "$output_file"
     else
         # Pruned find avoids descending into heavy directories.
         local prune_args=()
@@ -287,7 +361,7 @@ scan_purge_targets() {
             if is_safe_project_artifact "$item" "$search_path"; then
                 echo "$item"
             fi
-        done | filter_nested_artifacts > "$output_file"
+        done | filter_nested_artifacts | filter_protected_artifacts > "$output_file"
     fi
 }
 # Filter out nested artifacts (e.g. node_modules inside node_modules).
@@ -306,6 +380,14 @@ filter_nested_artifacts() {
         fi
     done
 }
+
+filter_protected_artifacts() {
+    while IFS= read -r item; do
+        if ! is_protected_purge_artifact "$item"; then
+            echo "$item"
+        fi
+    done
+}
 # Args: $1 - path
 # Check if a path was modified recently (safety check).
 is_recently_modified() {
@@ -316,7 +398,8 @@ is_recently_modified() {
     fi
     local mod_time
     mod_time=$(get_file_mtime "$path")
-    local current_time=$(date +%s)
+    local current_time
+    current_time=$(get_epoch_seconds)
     local age_seconds=$((current_time - mod_time))
     local age_in_days=$((age_seconds / 86400))
     if [[ $age_in_days -lt $age_days ]]; then

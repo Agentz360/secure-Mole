@@ -101,6 +101,318 @@ setup() {
     [[ "$result" == "2" ]]
 }
 
+# Vendor protection unit tests
+@test "is_rails_project_root: detects valid Rails project" {
+    mkdir -p "$HOME/www/test-rails/config"
+    mkdir -p "$HOME/www/test-rails/bin"
+    touch "$HOME/www/test-rails/config/application.rb"
+    touch "$HOME/www/test-rails/Gemfile"
+    touch "$HOME/www/test-rails/bin/rails"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        if is_rails_project_root '$HOME/www/test-rails'; then
+            echo 'YES'
+        else
+            echo 'NO'
+        fi
+    ")
+
+    [[ "$result" == "YES" ]]
+}
+
+@test "is_rails_project_root: rejects non-Rails directory" {
+    mkdir -p "$HOME/www/not-rails"
+    touch "$HOME/www/not-rails/package.json"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        if is_rails_project_root '$HOME/www/not-rails'; then
+            echo 'YES'
+        else
+            echo 'NO'
+        fi
+    ")
+
+    [[ "$result" == "NO" ]]
+}
+
+@test "is_go_project_root: detects valid Go project" {
+    mkdir -p "$HOME/www/test-go"
+    touch "$HOME/www/test-go/go.mod"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        if is_go_project_root '$HOME/www/test-go'; then
+            echo 'YES'
+        else
+            echo 'NO'
+        fi
+    ")
+
+    [[ "$result" == "YES" ]]
+}
+
+@test "is_php_project_root: detects valid PHP Composer project" {
+    mkdir -p "$HOME/www/test-php"
+    touch "$HOME/www/test-php/composer.json"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        if is_php_project_root '$HOME/www/test-php'; then
+            echo 'YES'
+        else
+            echo 'NO'
+        fi
+    ")
+
+    [[ "$result" == "YES" ]]
+}
+
+@test "is_protected_vendor_dir: protects Rails vendor" {
+    mkdir -p "$HOME/www/rails-app/vendor"
+    mkdir -p "$HOME/www/rails-app/config"
+    touch "$HOME/www/rails-app/config/application.rb"
+    touch "$HOME/www/rails-app/Gemfile"
+    touch "$HOME/www/rails-app/config/environment.rb"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        if is_protected_vendor_dir '$HOME/www/rails-app/vendor'; then
+            echo 'PROTECTED'
+        else
+            echo 'NOT_PROTECTED'
+        fi
+    ")
+
+    [[ "$result" == "PROTECTED" ]]
+}
+
+@test "is_protected_vendor_dir: does not protect PHP vendor" {
+    mkdir -p "$HOME/www/php-app/vendor"
+    touch "$HOME/www/php-app/composer.json"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        if is_protected_vendor_dir '$HOME/www/php-app/vendor'; then
+            echo 'PROTECTED'
+        else
+            echo 'NOT_PROTECTED'
+        fi
+    ")
+
+    [[ "$result" == "NOT_PROTECTED" ]]
+}
+
+@test "is_project_container detects project indicators" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+mkdir -p "$HOME/Workspace2/project"
+touch "$HOME/Workspace2/project/package.json"
+if is_project_container "$HOME/Workspace2" 2; then
+    echo "yes"
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"yes"* ]]
+}
+
+@test "discover_project_dirs includes detected containers" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+mkdir -p "$HOME/CustomProjects/app"
+touch "$HOME/CustomProjects/app/go.mod"
+discover_project_dirs | grep -q "$HOME/CustomProjects"
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
+@test "save_discovered_paths writes config with tilde" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+save_discovered_paths "$HOME/Projects"
+grep -q "^~/" "$HOME/.config/mole/purge_paths"
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
+@test "select_purge_categories returns failure on empty input" {
+    run env HOME="$HOME" PROJECT_ROOT="$PROJECT_ROOT" bash --noprofile --norc <<'EOF'
+set -euo pipefail
+source "$PROJECT_ROOT/lib/clean/project.sh"
+if select_purge_categories; then
+    exit 1
+fi
+EOF
+
+    [ "$status" -eq 0 ]
+}
+
+@test "is_protected_vendor_dir: protects Go vendor" {
+    mkdir -p "$HOME/www/go-app/vendor"
+    touch "$HOME/www/go-app/go.mod"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        if is_protected_vendor_dir '$HOME/www/go-app/vendor'; then
+            echo 'PROTECTED'
+        else
+            echo 'NOT_PROTECTED'
+        fi
+    ")
+
+    [[ "$result" == "PROTECTED" ]]
+}
+
+@test "is_protected_vendor_dir: protects unknown vendor (conservative)" {
+    mkdir -p "$HOME/www/unknown-app/vendor"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        if is_protected_vendor_dir '$HOME/www/unknown-app/vendor'; then
+            echo 'PROTECTED'
+        else
+            echo 'NOT_PROTECTED'
+        fi
+    ")
+
+    [[ "$result" == "PROTECTED" ]]
+}
+
+@test "is_protected_purge_artifact: handles vendor directories correctly" {
+    mkdir -p "$HOME/www/php-app/vendor"
+    touch "$HOME/www/php-app/composer.json"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        if is_protected_purge_artifact '$HOME/www/php-app/vendor'; then
+            echo 'PROTECTED'
+        else
+            echo 'NOT_PROTECTED'
+        fi
+    ")
+
+    # PHP vendor should not be protected
+    [[ "$result" == "NOT_PROTECTED" ]]
+}
+
+@test "is_protected_purge_artifact: returns false for non-vendor artifacts" {
+    mkdir -p "$HOME/www/app/node_modules"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        if is_protected_purge_artifact '$HOME/www/app/node_modules'; then
+            echo 'PROTECTED'
+        else
+            echo 'NOT_PROTECTED'
+        fi
+    ")
+
+    # node_modules is not in the protected list
+    [[ "$result" == "NOT_PROTECTED" ]]
+}
+
+# Integration tests
+@test "scan_purge_targets: skips Rails vendor directory" {
+    mkdir -p "$HOME/www/rails-app/vendor/javascript"
+    mkdir -p "$HOME/www/rails-app/config"
+    touch "$HOME/www/rails-app/config/application.rb"
+    touch "$HOME/www/rails-app/Gemfile"
+    mkdir -p "$HOME/www/rails-app/bin"
+    touch "$HOME/www/rails-app/bin/rails"
+
+    local scan_output
+    scan_output="$(mktemp)"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        scan_purge_targets '$HOME/www' '$scan_output'
+        if grep -q '$HOME/www/rails-app/vendor' '$scan_output'; then
+            echo 'FOUND'
+        else
+            echo 'SKIPPED'
+        fi
+    ")
+
+    rm -f "$scan_output"
+
+    [[ "$result" == "SKIPPED" ]]
+}
+
+@test "scan_purge_targets: cleans PHP Composer vendor directory" {
+    mkdir -p "$HOME/www/php-app/vendor"
+    touch "$HOME/www/php-app/composer.json"
+
+    local scan_output
+    scan_output="$(mktemp)"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        scan_purge_targets '$HOME/www' '$scan_output'
+        if grep -q '$HOME/www/php-app/vendor' '$scan_output'; then
+            echo 'FOUND'
+        else
+            echo 'MISSING'
+        fi
+    ")
+
+    rm -f "$scan_output"
+
+    [[ "$result" == "FOUND" ]]
+}
+
+@test "scan_purge_targets: skips Go vendor directory" {
+    mkdir -p "$HOME/www/go-app/vendor"
+    touch "$HOME/www/go-app/go.mod"
+    touch "$HOME/www/go-app/go.sum"
+
+    local scan_output
+    scan_output="$(mktemp)"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        scan_purge_targets '$HOME/www' '$scan_output'
+        if grep -q '$HOME/www/go-app/vendor' '$scan_output'; then
+            echo 'FOUND'
+        else
+            echo 'SKIPPED'
+        fi
+    ")
+
+    rm -f "$scan_output"
+
+    [[ "$result" == "SKIPPED" ]]
+}
+
+@test "scan_purge_targets: skips unknown vendor directory" {
+    # Create a vendor directory without any project file
+    mkdir -p "$HOME/www/unknown-app/vendor"
+
+    local scan_output
+    scan_output="$(mktemp)"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        scan_purge_targets '$HOME/www' '$scan_output'
+        if grep -q '$HOME/www/unknown-app/vendor' '$scan_output'; then
+            echo 'FOUND'
+        else
+            echo 'SKIPPED'
+        fi
+    ")
+
+    rm -f "$scan_output"
+
+    # Unknown vendor should be protected (conservative approach)
+    [[ "$result" == "SKIPPED" ]]
+}
+
 @test "is_recently_modified: detects recent projects" {
     mkdir -p "$HOME/www/project/node_modules"
     touch "$HOME/www/project/package.json"

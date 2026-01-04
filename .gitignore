@@ -11,8 +11,9 @@ Thumbs.db
 *~
 *.swp
 *.swo
-.vscode/
 .idea/
+.vscode/*.code-workspace
+.vscode/settings.json
 
 # Logs
 *.log
@@ -24,6 +25,7 @@ temp/
 *.tmp
 *.temp
 *.dmg
+tests/tmp-*
 
 # Cache
 .cache/
@@ -58,3 +60,8 @@ bin/analyze-go
 bin/status-go
 bin/analyze-darwin-*
 bin/status-darwin-*
+
+# Test artifacts
+tests/tmp-*/
+tests/*.tmp
+tests/*.log

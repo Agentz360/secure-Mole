@@ -8,11 +8,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 source "$SCRIPT_DIR/lib/core/common.sh"
+source "$SCRIPT_DIR/lib/core/commands.sh"
 
 trap cleanup_temp_files EXIT INT TERM
 
 # Version and update helpers
-VERSION="1.17.0"
+VERSION="1.18.0"
 MOLE_TAGLINE="Deep clean and optimize your Mac."
 
 is_touchid_configured() {
@@ -128,24 +129,9 @@ animate_mole_intro() {
 
     local -a mole_lines=()
 
-    if is_christmas_season; then
-        while IFS= read -r line; do
-            mole_lines+=("$line")
-        done << 'EOF'
-       *
-      /o\
-     {/\_/\}
-   ____/ o o \
- /~____  =o= /
-(______)__m_m)
-        /   \
-     __/ /\ \__
-    /__/  \__\_
-EOF
-    else
-        while IFS= read -r line; do
-            mole_lines+=("$line")
-        done << 'EOF'
+    while IFS= read -r line; do
+        mole_lines+=("$line")
+    done << 'EOF'
         /\_/\
    ____/ o o \
  /~____  =o= /
@@ -154,37 +140,20 @@ EOF
      __/ /\ \__
     /__/  \__\_
 EOF
-    fi
 
     local idx
-    local hat_color="${RED}"
-    local body_cutoff
+    local body_cutoff=4
     local body_color="${PURPLE}"
     local ground_color="${GREEN}"
 
-    if is_christmas_season; then
-        body_cutoff=6
-        for idx in "${!mole_lines[@]}"; do
-            if ((idx < 3)); then
-                printf "%s\n" "${hat_color}${mole_lines[$idx]}${NC}"
-            elif ((idx < body_cutoff)); then
-                printf "%s\n" "${body_color}${mole_lines[$idx]}${NC}"
-            else
-                printf "%s\n" "${ground_color}${mole_lines[$idx]}${NC}"
-            fi
-            sleep 0.1
-        done
-    else
-        body_cutoff=4
-        for idx in "${!mole_lines[@]}"; do
-            if ((idx < body_cutoff)); then
-                printf "%s\n" "${body_color}${mole_lines[$idx]}${NC}"
-            else
-                printf "%s\n" "${ground_color}${mole_lines[$idx]}${NC}"
-            fi
-            sleep 0.1
-        done
-    fi
+    for idx in "${!mole_lines[@]}"; do
+        if ((idx < body_cutoff)); then
+            printf "%s\n" "${body_color}${mole_lines[$idx]}${NC}"
+        else
+            printf "%s\n" "${ground_color}${mole_lines[$idx]}${NC}"
+        fi
+        sleep 0.1
+    done
 
     printf '\n'
     sleep 0.5
@@ -210,7 +179,7 @@ show_version() {
     local sip_status
     if command -v csrutil > /dev/null; then
         sip_status=$(csrutil status 2> /dev/null | grep -o "enabled\|disabled" || echo "Unknown")
-        sip_status="$(tr '[:lower:]' '[:upper:]' <<< "${sip_status:0:1}")${sip_status:1}"
+        sip_status="$(LC_ALL=C tr '[:lower:]' '[:upper:]' <<< "${sip_status:0:1}")${sip_status:1}"
     else
         sip_status="Unknown"
     fi
@@ -238,17 +207,14 @@ show_help() {
     echo
     printf "%s%s%s\n" "$BLUE" "COMMANDS" "$NC"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo" "$NC" "Main menu"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo clean" "$NC" "Free up disk space"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo uninstall" "$NC" "Remove apps completely"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo optimize" "$NC" "Check and maintain system"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo analyze" "$NC" "Explore disk usage"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo status" "$NC" "Monitor system health"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo purge" "$NC" "Remove old project artifacts"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo touchid" "$NC" "Configure Touch ID for sudo"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo update" "$NC" "Update to latest version"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo remove" "$NC" "Remove Mole from system"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo --help" "$NC" "Show help"
-    printf "  %s%-28s%s %s\n" "$GREEN" "mo --version" "$NC" "Show version"
+    for entry in "${MOLE_COMMANDS[@]}"; do
+        local name="${entry%%:*}"
+        local desc="${entry#*:}"
+        local display="mo $name"
+        [[ "$name" == "help" ]] && display="mo --help"
+        [[ "$name" == "version" ]] && display="mo --version"
+        printf "  %s%-28s%s %s\n" "$GREEN" "$display" "$NC" "$desc"
+    done
     echo
     printf "  %s%-28s%s %s\n" "$GREEN" "mo clean --dry-run" "$NC" "Preview cleanup"
     printf "  %s%-28s%s %s\n" "$GREEN" "mo clean --whitelist" "$NC" "Manage protected caches"
@@ -647,7 +613,7 @@ interactive_main_menu() {
             local flag_file
             local cache_dir="$HOME/.cache/mole"
             ensure_user_dir "$cache_dir"
-            flag_file="$cache_dir/intro_$(echo "$tty_name" | tr -c '[:alnum:]_' '_')"
+            flag_file="$cache_dir/intro_$(echo "$tty_name" | LC_ALL=C tr -c '[:alnum:]_' '_')"
             if [[ ! -f "$flag_file" ]]; then
                 animate_mole_intro
                 ensure_user_file "$flag_file"
@@ -784,6 +750,9 @@ main() {
             ;;
         "touchid")
             exec "$SCRIPT_DIR/bin/touchid.sh" "${args[@]:1}"
+            ;;
+        "completion")
+            exec "$SCRIPT_DIR/bin/completion.sh" "${args[@]:1}"
             ;;
         "update")
             update_mole

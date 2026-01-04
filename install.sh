@@ -18,7 +18,7 @@ start_line_spinner() {
         echo -e "${BLUE}|${NC} $msg"
         return
     }
-    local chars="${MO_SPINNER_CHARS:-|/-\\}"
+    local chars="|/-\\"
     [[ -z "$chars" ]] && chars='|/-\\'
     local i=0
     (while true; do
@@ -112,12 +112,14 @@ resolve_source_dir() {
     if [[ -z "$branch" ]]; then
         branch="main"
     fi
-    if [[ "$branch" != "main" ]]; then
+    if [[ "$branch" != "main" && "$branch" != "dev" ]]; then
         branch="$(normalize_release_tag "$branch")"
     fi
     local url="https://github.com/tw93/mole/archive/refs/heads/main.tar.gz"
 
-    if [[ "$branch" != "main" ]]; then
+    if [[ "$branch" == "dev" ]]; then
+        url="https://github.com/tw93/mole/archive/refs/heads/dev.tar.gz"
+    elif [[ "$branch" != "main" ]]; then
         url="https://github.com/tw93/mole/archive/refs/tags/${branch}.tar.gz"
     fi
 
@@ -137,7 +139,8 @@ resolve_source_dir() {
             fi
         else
             stop_line_spinner
-            if [[ "$branch" != "main" ]]; then
+            # Only exit early for version tags (not for main/dev branches)
+            if [[ "$branch" != "main" && "$branch" != "dev" ]]; then
                 log_error "Failed to fetch version ${branch}. Check if tag exists."
                 exit 1
             fi
@@ -248,6 +251,12 @@ parse_args() {
         case "$token" in
             latest | main)
                 export MOLE_VERSION="main"
+                export MOLE_EDGE_INSTALL="true"
+                version_token="$token"
+                unset 'args[$i]'
+                ;;
+            dev)
+                export MOLE_VERSION="dev"
                 export MOLE_EDGE_INSTALL="true"
                 version_token="$token"
                 unset 'args[$i]'
@@ -425,6 +434,12 @@ download_binary() {
         chmod +x "$target_path"
         log_success "Installed local ${binary_name} binary"
         return 0
+    fi
+
+    if [[ "${MOLE_EDGE_INSTALL:-}" == "true" ]]; then
+        if build_binary_from_source "$binary_name" "$target_path"; then
+            return 0
+        fi
     fi
 
     local version
@@ -653,7 +668,8 @@ perform_install() {
     if [[ "${MOLE_EDGE_INSTALL:-}" == "true" ]]; then
         installed_version="${installed_version}-edge"
         echo ""
-        log_warning "Edge version installed on main branch"
+        local branch_name="${MOLE_VERSION:-main}"
+        log_warning "Edge version installed on ${branch_name} branch"
         log_info "This is a testing version; use 'mo update' to switch to stable"
     fi
 

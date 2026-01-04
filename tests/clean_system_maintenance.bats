@@ -234,18 +234,22 @@ source "$PROJECT_ROOT/lib/clean/brew.sh"
 mkdir -p "$HOME/.cache/mole"
 rm -f "$HOME/.cache/mole/brew_last_cleanup"
 
-mkdir -p "$HOME/Library/Caches/Homebrew"
-dd if=/dev/zero of="$HOME/Library/Caches/Homebrew/test.tar.gz" bs=1024 count=51200 2>/dev/null
+    start_inline_spinner(){ :; }
+    stop_inline_spinner(){ :; }
+    note_activity(){ :; }
+    run_with_timeout() {
+        local duration="$1"
+        shift
+        if [[ "$1" == "du" ]]; then
+            echo "51201 $3"
+            return 0
+        fi
+        "$@"
+    }
 
-MO_BREW_TIMEOUT=2
-
-start_inline_spinner(){ :; }
-stop_inline_spinner(){ :; }
-note_activity(){ :; }
-
-brew() {
-    case "$1" in
-        cleanup)
+    brew() {
+        case "$1" in
+            cleanup)
             echo "Removing: package"
             return 0
             ;;
@@ -259,9 +263,7 @@ brew() {
     esac
 }
 
-clean_homebrew
-
-rm -rf "$HOME/Library/Caches/Homebrew"
+    clean_homebrew
 EOF
 
     [ "$status" -eq 0 ]
@@ -451,42 +453,6 @@ EOF
     [[ "$output" == *"System up to date"* ]]
     [[ "$output" == *"MACOS_UPDATE_AVAILABLE=false"* ]]
     [[ "$output" != *"SHOULD_NOT_CALL_SOFTWAREUPDATE"* ]]
-}
-
-@test "check_macos_update respects MO_SOFTWAREUPDATE_TIMEOUT" {
-    run bash --noprofile --norc <<'EOF'
-set -euo pipefail
-source "$PROJECT_ROOT/lib/core/common.sh"
-source "$PROJECT_ROOT/lib/check/all.sh"
-
-defaults() { echo "1"; }
-
-export MO_SOFTWAREUPDATE_TIMEOUT=15
-
-run_with_timeout() {
-    local timeout="${1:-}"
-    shift
-    if [[ "$timeout" != "15" ]]; then
-        echo "BAD_TIMEOUT:$timeout"
-        return 124
-    fi
-    if [[ "${1:-}" == "softwareupdate" && "${2:-}" == "-l" && "${3:-}" == "--no-scan" ]]; then
-        echo "No new software available."
-        return 0
-    fi
-    return 124
-}
-
-start_inline_spinner(){ :; }
-stop_inline_spinner(){ :; }
-
-check_macos_update
-echo "TEST_PASSED"
-EOF
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"TEST_PASSED"* ]]
-    [[ "$output" != *"BAD_TIMEOUT:"* ]]
 }
 
 @test "check_macos_update outputs debug info when MO_DEBUG set" {

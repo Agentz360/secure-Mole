@@ -88,9 +88,9 @@ paginated_multi_select() {
     local cursor_pos=0
     local top_index=0
     local filter_query=""
-    local filter_mode="false"                         # filter mode toggle
-    local sort_mode="${MOLE_MENU_SORT_DEFAULT:-date}" # date|name|size
-    local sort_reverse="false"
+    local filter_mode="false"                                                 # filter mode toggle
+    local sort_mode="${MOLE_MENU_SORT_MODE:-${MOLE_MENU_SORT_DEFAULT:-date}}" # date|name|size
+    local sort_reverse="${MOLE_MENU_SORT_REVERSE:-false}"
     # Live query vs applied query
     local applied_query=""
     local searching="false"
@@ -198,6 +198,8 @@ paginated_multi_select() {
     # Cleanup function
     cleanup() {
         trap - EXIT INT TERM
+        export MOLE_MENU_SORT_MODE="$sort_mode"
+        export MOLE_MENU_SORT_REVERSE="$sort_reverse"
         restore_terminal
         unset MOLE_READ_KEY_FORCE_CHAR
     }
@@ -628,9 +630,6 @@ paginated_multi_select() {
                     printf "\033[%d;1H" "$((items_per_page + 4))" >&2
 
                     prev_cursor_pos=$cursor_pos
-
-                    # Drain pending input for smoother fast scrolling
-                    drain_pending_input
                     continue # Skip full redraw
                 elif [[ $top_index -gt 0 ]]; then
                     ((top_index--))
@@ -669,9 +668,6 @@ paginated_multi_select() {
                             printf "\033[%d;1H" "$((items_per_page + 4))" >&2
 
                             prev_cursor_pos=$cursor_pos
-
-                            # Drain pending input for smoother fast scrolling
-                            drain_pending_input
                             continue # Skip full redraw
                         elif [[ $((top_index + visible_count)) -lt ${#view_indices[@]} ]]; then
                             ((top_index++))
@@ -895,6 +891,8 @@ paginated_multi_select() {
 
                 trap - EXIT INT TERM
                 MOLE_SELECTION_RESULT="$final_result"
+                export MOLE_MENU_SORT_MODE="$sort_mode"
+                export MOLE_MENU_SORT_REVERSE="$sort_reverse"
                 restore_terminal
                 return 0
                 ;;

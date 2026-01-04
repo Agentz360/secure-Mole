@@ -22,16 +22,18 @@ clean_dev_npm() {
     fi
     # Clean pnpm store cache
     local pnpm_default_store=~/Library/pnpm/store
-    if command -v pnpm > /dev/null 2>&1; then
-        clean_tool_cache "pnpm cache" pnpm store prune
+    # Check if pnpm is actually usable (not just Corepack shim)
+    if command -v pnpm > /dev/null 2>&1 && COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm --version > /dev/null 2>&1; then
+        COREPACK_ENABLE_DOWNLOAD_PROMPT=0 clean_tool_cache "pnpm cache" pnpm store prune
         local pnpm_store_path
         start_section_spinner "Checking store path..."
-        pnpm_store_path=$(run_with_timeout 2 pnpm store path 2> /dev/null) || pnpm_store_path=""
+        pnpm_store_path=$(COREPACK_ENABLE_DOWNLOAD_PROMPT=0 run_with_timeout 2 pnpm store path 2> /dev/null) || pnpm_store_path=""
         stop_section_spinner
         if [[ -n "$pnpm_store_path" && "$pnpm_store_path" != "$pnpm_default_store" ]]; then
             safe_clean "$pnpm_default_store"/* "Orphaned pnpm store"
         fi
     else
+        # pnpm not installed or not usable, just clean the default store directory
         safe_clean "$pnpm_default_store"/* "pnpm store"
     fi
     note_activity
@@ -129,7 +131,23 @@ clean_dev_frontend() {
     safe_clean ~/.cache/prettier/* "Prettier cache"
 }
 # Mobile dev caches (can be large).
+# Check for multiple Android NDK versions.
+check_android_ndk() {
+    local ndk_dir="$HOME/Library/Android/sdk/ndk"
+    if [[ -d "$ndk_dir" ]]; then
+        local count
+        count=$(find "$ndk_dir" -mindepth 1 -maxdepth 1 -type d 2> /dev/null | wc -l | tr -d ' ')
+        if [[ "$count" -gt 1 ]]; then
+            note_activity
+            echo -e "  Found ${GREEN}${count}${NC} Android NDK versions"
+            echo -e "  You can delete unused versions manually: ${ndk_dir}"
+        fi
+    fi
+}
+
 clean_dev_mobile() {
+    check_android_ndk
+
     if command -v xcrun > /dev/null 2>&1; then
         debug_log "Checking for unavailable Xcode simulators"
         if [[ "$DRY_RUN" == "true" ]]; then

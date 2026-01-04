@@ -32,10 +32,10 @@
 brew install mole
 ```
 
-**or by Script:**
+**or by Script, for older macOS or latest code:**
 
 ```bash
-# Append '-s latest' for latest code or '-s 1.17.0' for specific version
+# Add '-s latest' for newest, '-s dev' for development, or '-s 1.17.0' for a version.
 curl -fsSL https://raw.githubusercontent.com/tw93/mole/main/install.sh | bash
 ```
 
@@ -51,6 +51,7 @@ mo status                    # Live system health dashboard
 mo purge                     # Clean project build artifacts
 
 mo touchid                   # Configure Touch ID for sudo
+mo completion                # Setup shell tab completion
 mo update                    # Update Mole
 mo remove                    # Remove Mole from system
 mo --help                    # Show help
@@ -70,6 +71,7 @@ mo purge --paths             # Configure project scan directories
 - **Safety**: Built with strict protections. See our [Security Audit](SECURITY_AUDIT.md). Preview changes with `mo clean --dry-run`.
 - **Whitelist**: Manage protected paths with `mo clean --whitelist`.
 - **Touch ID**: Enable Touch ID for sudo commands by running `mo touchid`.
+- **Shell Completion**: Enable tab completion by running `mo completion` (auto-detect and install).
 - **Navigation**: Supports standard arrow keys and Vim bindings (`h/j/k/l`).
 - **Debug**: View detailed logs by appending the `--debug` flag (e.g., `mo clean --debug`).
 
@@ -243,7 +245,7 @@ Users from around the world are loving Mole! Join the community and share your e
 <a href="https://miaoyan.app/cats.html?name=Mole"><img src="https://miaoyan.app/assets/sponsors.svg" width="1000px" /></a>
 
 - If Mole saved you space, consider starring the repo or sharing it with friends who need a cleaner Mac.
-- Have ideas or fixes? Open an issue or PR to help shape Mole's future with the community.
+- Have ideas or fixes? Check our [Contributing Guide](CONTRIBUTING.md), then open an issue or PR to help shape Mole's future.
 - Love cats? Treat Tangyuan and Cola to canned food via <a href="https://miaoyan.app/cats.html?name=Mole" target="_blank">this link</a> to keep our mascots purring.
 
 ## License
