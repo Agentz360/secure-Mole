@@ -483,14 +483,21 @@ EOF
 }
 
 @test "clean_project_artifacts: scans and finds artifacts" {
+    if ! command -v gtimeout >/dev/null 2>&1 && ! command -v timeout >/dev/null 2>&1; then
+        skip "gtimeout/timeout not available"
+    fi
+
     mkdir -p "$HOME/www/test-project/node_modules/package1"
     echo "test data" > "$HOME/www/test-project/node_modules/package1/index.js"
 
     mkdir -p "$HOME/www/test-project"
 
+    timeout_cmd="timeout"
+    command -v timeout >/dev/null 2>&1 || timeout_cmd="gtimeout"
+
     run bash -c "
         export HOME='$HOME'
-        timeout 5 '$PROJECT_ROOT/bin/purge.sh' 2>&1 < /dev/null || true
+        $timeout_cmd 5 '$PROJECT_ROOT/bin/purge.sh' 2>&1 < /dev/null || true
     "
 
     [[ "$output" =~ "Scanning" ]] ||
@@ -511,18 +518,126 @@ EOF
 }
 
 @test "mo purge: accepts --debug flag" {
+    if ! command -v gtimeout >/dev/null 2>&1 && ! command -v timeout >/dev/null 2>&1; then
+        skip "gtimeout/timeout not available"
+    fi
+
+    timeout_cmd="timeout"
+    command -v timeout >/dev/null 2>&1 || timeout_cmd="gtimeout"
+
     run bash -c "
         export HOME='$HOME'
-        timeout 2 '$PROJECT_ROOT/mole' purge --debug < /dev/null 2>&1 || true
+        $timeout_cmd 2 '$PROJECT_ROOT/mole' purge --debug < /dev/null 2>&1 || true
     "
     true
 }
 
 @test "mo purge: creates cache directory for stats" {
+    if ! command -v gtimeout >/dev/null 2>&1 && ! command -v timeout >/dev/null 2>&1; then
+        skip "gtimeout/timeout not available"
+    fi
+
+    timeout_cmd="timeout"
+    command -v timeout >/dev/null 2>&1 || timeout_cmd="gtimeout"
+
     bash -c "
         export HOME='$HOME'
-        timeout 2 '$PROJECT_ROOT/mole' purge < /dev/null 2>&1 || true
+        $timeout_cmd 2 '$PROJECT_ROOT/mole' purge < /dev/null 2>&1 || true
     "
 
     [ -d "$HOME/.cache/mole" ] || [ -d "${XDG_CACHE_HOME:-$HOME/.cache}/mole" ]
+}
+
+# .NET bin directory detection tests
+@test "is_dotnet_bin_dir: finds .NET context in parent directory with Debug dir" {
+    mkdir -p "$HOME/www/dotnet-app/bin/Debug"
+    touch "$HOME/www/dotnet-app/MyProject.csproj"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        if is_dotnet_bin_dir '$HOME/www/dotnet-app/bin'; then
+            echo 'FOUND'
+        else
+            echo 'NOT_FOUND'
+        fi
+    ")
+
+    [[ "$result" == "FOUND" ]]
+}
+
+@test "is_dotnet_bin_dir: requires .csproj AND Debug/Release" {
+    mkdir -p "$HOME/www/dotnet-app/bin"
+    touch "$HOME/www/dotnet-app/MyProject.csproj"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        if is_dotnet_bin_dir '$HOME/www/dotnet-app/bin'; then
+            echo 'FOUND'
+        else
+            echo 'NOT_FOUND'
+        fi
+    ")
+
+    # Should not find it because Debug/Release directories don't exist
+    [[ "$result" == "NOT_FOUND" ]]
+}
+
+@test "is_dotnet_bin_dir: rejects non-bin directories" {
+    mkdir -p "$HOME/www/dotnet-app/obj"
+    touch "$HOME/www/dotnet-app/MyProject.csproj"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        if is_dotnet_bin_dir '$HOME/www/dotnet-app/obj'; then
+            echo 'FOUND'
+        else
+            echo 'NOT_FOUND'
+        fi
+    ")
+    [[ "$result" == "NOT_FOUND" ]]
+}
+
+
+# Integration test for bin scanning
+@test "scan_purge_targets: includes .NET bin directories with Debug/Release" {
+    mkdir -p "$HOME/www/dotnet-app/bin/Debug"
+    touch "$HOME/www/dotnet-app/MyProject.csproj"
+
+    local scan_output
+    scan_output="$(mktemp)"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        scan_purge_targets '$HOME/www' '$scan_output'
+        if grep -q '$HOME/www/dotnet-app/bin' '$scan_output'; then
+            echo 'FOUND'
+        else
+            echo 'MISSING'
+        fi
+    ")
+
+    rm -f "$scan_output"
+
+    [[ "$result" == "FOUND" ]]
+}
+
+@test "scan_purge_targets: skips generic bin directories (non-.NET)" {
+    mkdir -p "$HOME/www/ruby-app/bin"
+    touch "$HOME/www/ruby-app/Gemfile"
+
+    local scan_output
+    scan_output="$(mktemp)"
+
+    result=$(bash -c "
+        source '$PROJECT_ROOT/lib/clean/project.sh'
+        scan_purge_targets '$HOME/www' '$scan_output'
+        if grep -q '$HOME/www/ruby-app/bin' '$scan_output'; then
+            echo 'FOUND'
+        else
+            echo 'SKIPPED'
+        fi
+    ")
+
+    rm -f "$scan_output"
+    [[ "$result" == "SKIPPED" ]]
 }

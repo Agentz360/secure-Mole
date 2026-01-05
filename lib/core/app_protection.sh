@@ -50,17 +50,8 @@ readonly SYSTEM_CRITICAL_BUNDLES=(
     "KeyLayout*"
     "GlobalPreferences"
     ".GlobalPreferences"
-    # Input methods (critical for international users)
-    "com.tencent.inputmethod.QQInput"
-    "com.sogou.inputmethod.*"
-    "com.baidu.inputmethod.*"
     "com.apple.inputmethod.*"
-    "com.googlecode.rimeime.*"
-    "im.rime.*"
     "org.pqrs.Karabiner*"
-    "*.inputmethod"
-    "*.InputMethod"
-    "*IME"
     "com.apple.inputsource*"
     "com.apple.TextInputMenuAgent"
     "com.apple.TextInputSwitcher"
@@ -68,6 +59,16 @@ readonly SYSTEM_CRITICAL_BUNDLES=(
 
 # Applications with sensitive data; protected during cleanup but removable
 readonly DATA_PROTECTED_BUNDLES=(
+    # Input Methods (protected during cleanup, uninstall allowed)
+    "com.tencent.inputmethod.QQInput"
+    "com.sogou.inputmethod.*"
+    "com.baidu.inputmethod.*"
+    "com.googlecode.rimeime.*"
+    "im.rime.*"
+    "*.inputmethod"
+    "*.InputMethod"
+    "*IME"
+
     # System Utilities & Cleanup Tools
     "com.nektony.*"                 # App Cleaner & Uninstaller
     "com.macpaw.*"                  # CleanMyMac, CleanMaster
@@ -598,11 +599,29 @@ is_path_whitelisted() {
     for pattern in "${WHITELIST_PATTERNS[@]}"; do
         # Pattern is already expanded/normalized in bin/clean.sh
         local check_pattern="${pattern%/}"
+        local has_glob="false"
+        case "$check_pattern" in
+            *\** | *\?* | *\[*)
+                has_glob="true"
+                ;;
+        esac
 
         # Check for exact match or glob pattern match
         # shellcheck disable=SC2053
         if [[ "$normalized_target" == "$check_pattern" ]] ||
             [[ "$normalized_target" == $check_pattern ]]; then
+            return 0
+        fi
+
+        # Check if target is a parent directory of a whitelisted path
+        # e.g., if pattern is /path/to/dir/subdir and target is /path/to/dir,
+        # the target should be protected to preserve its whitelisted children
+        if [[ "$check_pattern" == "$normalized_target"/* ]]; then
+            return 0
+        fi
+
+        # Check if target is a child of a whitelisted directory path
+        if [[ "$has_glob" == "false" && "$normalized_target" == "$check_pattern"/* ]]; then
             return 0
         fi
     done
@@ -645,6 +664,8 @@ find_app_files() {
         "$HOME/Library/Audio/Plug-Ins/VST3/$app_name.vst3"
         "$HOME/Library/Audio/Plug-Ins/Digidesign/$app_name.dpm"
         "$HOME/Library/PreferencePanes/$app_name.prefPane"
+        "$HOME/Library/Input Methods/$app_name.app"
+        "$HOME/Library/Input Methods/$bundle_id.app"
         "$HOME/Library/Screen Savers/$app_name.saver"
         "$HOME/Library/Frameworks/$app_name.framework"
         "$HOME/Library/Autosave Information/$bundle_id"
@@ -780,6 +801,8 @@ find_app_system_files() {
         "/Library/Receipts/$bundle_id.plist"
         "/Library/Frameworks/$app_name.framework"
         "/Library/Internet Plug-Ins/$app_name.plugin"
+        "/Library/Input Methods/$app_name.app"
+        "/Library/Input Methods/$bundle_id.app"
         "/Library/Audio/Plug-Ins/Components/$app_name.component"
         "/Library/Audio/Plug-Ins/VST/$app_name.vst"
         "/Library/Audio/Plug-Ins/VST3/$app_name.vst3"
